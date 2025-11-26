@@ -1,9 +1,10 @@
 import 'dart:io';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:record/record.dart';
 import 'package:permission_handler/permission_handler.dart';
-import '../services/watson_service.dart';
+import '../services/api_service.dart';
 import '../models/note.dart';
 
 class RecordingScreen extends StatefulWidget {
@@ -21,7 +22,7 @@ class _RecordingScreenState extends State<RecordingScreen> {
   bool _isProcessing = false;
   String? _audioPath;
   String _transcribedText = '';
-  final WatsonService _watsonService = WatsonService();
+  final ApiService _apiService = ApiService();
 
   @override
   void initState() {
@@ -31,50 +32,114 @@ class _RecordingScreenState extends State<RecordingScreen> {
   }
 
   Future<void> _initRecorder() async {
-    final status = await Permission.microphone.request();
-    if (status != PermissionStatus.granted) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Se requiere permiso para el micrófono')),
-        );
+    try {
+      // En web, el permiso se solicita automáticamente al iniciar la grabación
+      if (!kIsWeb) {
+        final status = await Permission.microphone.request();
+        if (status != PermissionStatus.granted) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('Se requiere permiso para el micrófono')),
+            );
+          }
+          return;
+        }
       }
+      print('✓ Grabadora inicializada correctamente');
+    } catch (e) {
+      print('Error iniciando grabadora: $e');
     }
   }
 
   Future<void> _startRecording() async {
     try {
+      print('🎤 Iniciando grabación...');
+      
       if (await _audioRecorder.hasPermission()) {
-        final directory = await getTemporaryDirectory();
-        final path = '${directory.path}/audio_${DateTime.now().millisecondsSinceEpoch}.wav';
+        String path;
         
-        // In v4, start takes path as a named argument or positional depending on exact version, 
-        // but usually: start(path: path, encoder: AudioEncoder.wav)
-        // Let's try the standard v4 signature.
-        await _audioRecorder.start(path: path, encoder: AudioEncoder.wav);
+        if (kIsWeb) {
+          // En web, no necesitamos directorio, el audio se guarda en memoria
+          path = 'audio_${DateTime.now().millisecondsSinceEpoch}';
+        } else {
+          // En móvil, guardamos en el directorio temporal
+          final directory = await getTemporaryDirectory();
+          path = '${directory.path}/audio_${DateTime.now().millisecondsSinceEpoch}.wav';
+        }
+        
+        // Configuración mejorada para grabación
+        await _audioRecorder.start(
+          const RecordConfig(
+            encoder: AudioEncoder.wav,
+            sampleRate: 44100,
+            bitRate: 128000,
+          ),
+          path: path,
+        );
         
         setState(() {
           _isRecording = true;
           _audioPath = path;
           _transcribedText = '';
         });
+        
+        print('✓ Grabación iniciada: $path');
+        
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('🎙️ Grabando... Habla ahora'),
+              backgroundColor: Colors.green,
+              duration: Duration(seconds: 2),
+            ),
+          );
+        }
+      } else {
+        throw Exception('No se tiene permiso para grabar audio');
       }
     } catch (e) {
-      print('Error starting record: $e');
+      print('✗ Error al iniciar grabación: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
     }
   }
 
   Future<void> _stopRecording() async {
     try {
+      print('🛑 Deteniendo grabación...');
+      
       final path = await _audioRecorder.stop();
+      
       setState(() {
         _isRecording = false;
-        _audioPath = path;
       });
-      if (path != null) {
-        _transcribe(path);
+      
+      print('✓ Grabación detenida. Path: $path');
+      
+      if (path != null && path.isNotEmpty) {
+        setState(() {
+          _audioPath = path;
+        });
+        await _transcribe(path);
+      } else {
+        throw Exception('No se pudo obtener el archivo de audio');
       }
     } catch (e) {
-      print('Error stopping record: $e');
+      print('✗ Error al detener grabación: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
     }
   }
 
@@ -84,14 +149,33 @@ class _RecordingScreenState extends State<RecordingScreen> {
     });
     try {
       final File audioFile = File(path);
-      final text = await _watsonService.transcribeAudio(audioFile);
+      
+      // Verificar conexión con el backend
+      final isServerAvailable = await _apiService.checkServerHealth();
+      if (!isServerAvailable) {
+        throw Exception('No se puede conectar al servidor. Verifica que el backend esté ejecutándose en el puerto 8080.');
+      }
+      
+      // Transcribir usando el backend (Watson + Cloudant)
+      // El backend retorna: {titulo, texto, id_documento, fecha}
+      final response = await _apiService.transcribeAudio(audioFile);
+      
       setState(() {
-        _transcribedText = text;
+        _transcribedText = response['texto'] ?? 'No se detectó voz';
       });
     } catch (e) {
       setState(() {
         _transcribedText = 'Error: $e';
       });
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error: $e'),
+            backgroundColor: Colors.red,
+            duration: const Duration(seconds: 4),
+          ),
+        );
+      }
     } finally {
       setState(() {
         _isProcessing = false;
@@ -99,11 +183,59 @@ class _RecordingScreenState extends State<RecordingScreen> {
     }
   }
 
-  void _saveNote() {
+  Future<void> _saveNote() async {
     if (_transcribedText.isNotEmpty && _audioPath != null) {
-      final note = Note.create(text: _transcribedText, audioPath: _audioPath!);
-      widget.onSave(note);
-      Navigator.pop(context);
+      // El backend YA guardó la nota en Cloudant cuando transcribió
+      // Solo necesitamos obtener los datos del último transcribe
+      
+      try {
+        setState(() {
+          _isProcessing = true;
+        });
+        
+        final File audioFile = File(_audioPath!);
+        
+        // Volver a obtener la respuesta completa (incluye id_documento)
+        final response = await _apiService.transcribeAudio(audioFile);
+        
+        print('Respuesta del backend: $response');
+        
+        // Crear objeto Note con los datos de Cloudant
+        final note = Note.fromJson({
+          'id_documento': response['id_documento'],
+          'texto': response['texto'],
+          'titulo': response['titulo'],
+          'fecha': response['fecha'],
+          'audio_path': _audioPath,
+        });
+        
+        widget.onSave(note);
+        
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('¡Nota guardada exitosamente en Cloudant!'),
+              backgroundColor: Colors.green,
+            ),
+          );
+          Navigator.pop(context);
+        }
+      } catch (e) {
+        print('Error guardando nota: $e');
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Error: $e'),
+              backgroundColor: Colors.red,
+              duration: const Duration(seconds: 4),
+            ),
+          );
+        }
+      } finally {
+        setState(() {
+          _isProcessing = false;
+        });
+      }
     }
   }
 

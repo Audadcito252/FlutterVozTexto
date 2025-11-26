@@ -1,214 +1,308 @@
 # Flutter Voz a Texto - IBM Watson
 
-Aplicación Flutter que permite grabar notas de voz y convertirlas a texto utilizando el servicio IBM Watson Speech to Text.
+Aplicación Flutter que permite grabar notas de voz y convertirlas a texto utilizando el servicio IBM Watson Speech to Text a través de un backend FastAPI. Las notas se guardan en IBM Cloudant.
+
+## 🏗️ Arquitectura
+
+```
+Flutter App ←→ FastAPI Backend ←→ IBM Watson STT
+                      ↓
+                IBM Cloudant DB
+```
 
 ## Requisitos Previos
 
+### Frontend (Flutter)
 - Flutter SDK instalado (versión 3.0 o superior)
 - Dart SDK
 - Android Studio o Xcode (según la plataforma objetivo)
-- Cuenta de IBM Cloud con acceso a Watson Speech to Text
 - Editor de código (VS Code recomendado)
 
-## Paso 1: Crear el Proyecto Flutter
+### Backend (FastAPI)
+- Python 3.8 o superior
+- pip (gestor de paquetes de Python)
+- Cuenta de IBM Cloud con:
+  - Servicio Watson Speech to Text
+  - Base de datos Cloudant
 
-1. Abre una terminal en `c:\laragon\www\`
-2. Ejecuta:
-   ```bash
-   flutter create flutter_voz_texto
-   cd flutter_voz_texto
-   ```
+## 📦 Paso 1: Configurar el Backend FastAPI
 
-## Paso 2: Configurar Dependencias
+### 1.1 Crear el proyecto backend
 
-1. Abre `pubspec.yaml` y agrega las siguientes dependencias:
-   ```yaml
-   dependencies:
-     flutter:
-       sdk: flutter
-     record: ^5.0.0
-     path_provider: ^2.1.0
-     permission_handler: ^11.0.0
-     http: ^1.1.0
-   ```
+```bash
+# Crear carpeta para el backend
+mkdir flutter_voz_texto_backend
+cd flutter_voz_texto_backend
+```
 
-2. Ejecuta:
-   ```bash
-   flutter pub get
-   ```
+### 1.2 Crear archivo `requirements.txt`
 
-## Paso 3: Crear la Estructura del Proyecto
+```txt
+fastapi==0.109.0
+uvicorn[standard]==0.27.0
+python-multipart==0.0.6
+ibm-watson==7.0.1
+ibm-cloud-sdk-core==3.18.0
+cloudant==2.15.0
+python-dotenv==1.0.0
+```
 
-Crea los siguientes archivos y carpetas:
+### 1.3 Instalar dependencias
+
+```bash
+pip install -r requirements.txt
+```
+
+### 1.4 Crear archivo `.env` con tus credenciales
+
+```env
+WATSON_API_KEY=tu_watson_api_key_aquí
+WATSON_SERVICE_URL=https://api.us-south.speech-to-text.watson.cloud.ibm.com/instances/xxxxx
+CLOUDANT_API_KEY=tu_cloudant_api_key_aquí
+CLOUDANT_URL=https://xxxxx.cloudantnosqldb.appdomain.cloud
+CLOUDANT_DATABASE=voice_notes
+```
+
+### 1.5 Obtener credenciales de IBM Cloud
+
+#### Watson Speech to Text:
+1. Ve a [IBM Cloud Console](https://cloud.ibm.com/)
+2. Crea un servicio de **Speech to Text**
+3. En "Manage" → "Credentials", copia:
+   - **API Key** → `WATSON_API_KEY`
+   - **URL** → `WATSON_SERVICE_URL`
+
+#### IBM Cloudant:
+1. En IBM Cloud, crea un servicio de **Cloudant**
+2. En "Service Credentials", crea una credencial nueva
+3. Copia:
+   - **apikey** → `CLOUDANT_API_KEY`
+   - **url** → `CLOUDANT_URL`
+
+### 1.6 Estructura del backend
+
+Crea esta estructura de archivos:
 
 ```
-lib/
-├── main.dart
+flutter_voz_texto_backend/
+├── main.py              # API endpoints
+├── config.py            # Configuración
+├── requirements.txt     # Dependencias
+├── .env                 # Variables de entorno
 ├── models/
-│   └── note.dart
-├── screens/
-│   ├── home_screen.dart
-│   └── recording_screen.dart
+│   └── note.py         # Modelos Pydantic
 └── services/
-    ├── watson_service.dart
-    └── audio_service.dart
+    ├── watson_service.py    # Integración con Watson
+    └── cloudant_service.py  # Integración con Cloudant
 ```
 
-## Paso 4: Configurar Permisos
+### 1.7 Ejecutar el backend
 
-### Android
-1. Abre `android/app/src/main/AndroidManifest.xml`
-2. Agrega antes de `<application>`:
-   ```xml
-   <uses-permission android:name="android.permission.RECORD_AUDIO" />
-   <uses-permission android:name="android.permission.INTERNET" />
-   <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
-   <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
-   ```
+```bash
+# Opción 1: Con uvicorn directamente
+uvicorn main:app --reload --host 0.0.0.0 --port 8000
 
-### iOS
-1. Abre `ios/Runner/Info.plist`
-2. Agrega antes de `</dict>`:
-   ```xml
-   <key>NSMicrophoneUsageDescription</key>
-   <string>Necesitamos acceso al micrófono para grabar notas de voz.</string>
-   <key>UIBackgroundModes</key>
-   <array>
-     <string>audio</string>
-   </array>
-   ```
+# Opción 2: Ejecutar el script main.py
+python main.py
+```
 
-## Paso 5: Implementar el Modelo de Datos
+El backend estará disponible en:
+- API: `http://localhost:8000`
+- Documentación interactiva: `http://localhost:8000/docs`
 
-Crea `lib/models/note.dart`:
+## 📱 Paso 2: Configurar el Frontend Flutter
+
+### 2.1 Navegar al proyecto Flutter
+
+```bash
+cd c:\laragon\www\FlutterVozTexto
+```
+
+### 2.2 Instalar dependencias
+
+```bash
+flutter pub get
+```
+
+### 2.3 Configurar la URL del backend
+
+Abre `lib/services/api_service.dart` y modifica la URL según tu entorno:
+
 ```dart
-class Note {
-  final String id;
-  final String title;
-  final String content;
-  final DateTime createdAt;
-
-  Note({
-    required this.id,
-    required this.title,
-    required this.content,
-    required this.createdAt,
-  });
+class ApiService {
+  // ⚠️ Configura según tu plataforma:
+  
+  // Para Web
+  static const String baseUrl = 'http://localhost:8000';
+  
+  // Para Android Emulator
+  // static const String baseUrl = 'http://10.0.2.2:8000';
+  
+  // Para iOS Simulator
+  // static const String baseUrl = 'http://localhost:8000';
+  
+  // Para dispositivo físico (reemplaza con tu IP local)
+  // static const String baseUrl = 'http://192.168.1.100:8000';
+  
+  // ...
 }
 ```
 
-## Paso 6: Configurar IBM Watson
+### 2.4 Configurar permisos
 
-1. Inicia sesión en [IBM Cloud](https://cloud.ibm.com/)
-2. Crea un servicio de Speech to Text
-3. Obtén tu API Key y Service URL
-4. Crea `lib/services/watson_service.dart` y configura:
-   ```dart
-   class WatsonService {
-     static const String apiKey = 'TU_API_KEY';
-     static const String serviceUrl = 'TU_SERVICE_URL';
-     // ...resto del código
-   }
-   ```
+#### Android
+Abre `android/app/src/main/AndroidManifest.xml` y agrega:
 
-## Paso 7: Implementar el Servicio de Audio
-
-Crea `lib/services/audio_service.dart` para manejar la grabación de audio:
-- Inicializar el grabador
-- Iniciar/detener grabación
-- Guardar archivo de audio
-- Obtener permisos
-
-## Paso 8: Crear las Pantallas
-
-### Home Screen
-`lib/screens/home_screen.dart`:
-- Lista de notas guardadas
-- Botón para nueva grabación
-- Opciones para ver/eliminar notas
-
-### Recording Screen
-`lib/screens/recording_screen.dart`:
-- Interfaz de grabación
-- Visualización de forma de onda (opcional)
-- Controles de grabación
-- Envío a Watson para transcripción
-
-## Paso 9: Configurar el Main
-
-En `lib/main.dart`:
-```dart
-import 'package:flutter/material.dart';
-import 'screens/home_screen.dart';
-
-void main() {
-  runApp(const MyApp());
-}
-
-class MyApp extends StatelessWidget {
-  const MyApp({Key? key}) : super(key: key);
-
-  @override
-  Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'Voz a Texto',
-      theme: ThemeData(
-        primarySwatch: Colors.blue,
-      ),
-      home: const HomeScreen(),
-    );
-  }
-}
+```xml
+<uses-permission android:name="android.permission.RECORD_AUDIO" />
+<uses-permission android:name="android.permission.INTERNET" />
+<uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
+<uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
 ```
 
-## Paso 10: Ejecutar la Aplicación
+#### iOS
+Abre `ios/Runner/Info.plist` y agrega:
 
-1. Conecta un dispositivo físico o inicia un emulador
-2. Verifica la configuración:
-   ```bash
-   flutter doctor
-   ```
-3. Ejecuta la aplicación:
-   ```bash
-   flutter run
-   ```
+```xml
+<key>NSMicrophoneUsageDescription</key>
+<string>Necesitamos acceso al micrófono para grabar notas de voz.</string>
+<key>UIBackgroundModes</key>
+<array>
+  <string>audio</string>
+</array>
+```
 
-## Características Implementadas
+## ▶️ Paso 3: Ejecutar la Aplicación
+
+### 3.1 Verificar que el backend esté corriendo
+
+```bash
+# En una terminal, verifica el health check
+curl http://localhost:8000/health
+
+# Deberías ver: {"status":"healthy","service":"voice-notes-api"}
+```
+
+### 3.2 Ejecutar Flutter
+
+```bash
+# Para Web
+flutter run -d chrome --web-port=8080
+
+# Para Android
+flutter run -d <device_id>
+
+# Para listar dispositivos disponibles
+flutter devices
+```
+
+## 🧪 Paso 4: Probar la Integración
+
+### 4.1 Probar endpoints del backend
+
+```bash
+# Health check
+curl http://localhost:8000/health
+
+# Listar notas
+curl http://localhost:8000/api/notes
+
+# Ver documentación interactiva
+# Abre en el navegador: http://localhost:8000/docs
+```
+
+### 4.2 Flujo completo en la app
+
+1. **Grabar audio**: Toca el botón "Nueva nota" y presiona el micrófono
+2. **Transcribir**: El audio se envía al backend que usa Watson para transcribir
+3. **Guardar**: La nota se guarda automáticamente en Cloudant
+4. **Ver notas**: La pantalla principal carga las notas desde Cloudant
+5. **Eliminar**: Desliza una nota hacia la izquierda para eliminarla
+
+## 🔧 Características Implementadas
 
 - ✅ Grabación de audio en tiempo real
 - ✅ Conversión de voz a texto con IBM Watson
-- ✅ Almacenamiento local de notas
+- ✅ Almacenamiento persistente en IBM Cloudant
+- ✅ Backend REST API con FastAPI
+- ✅ Sincronización automática con la base de datos
+- ✅ Eliminación de notas (swipe to delete)
 - ✅ Interfaz intuitiva y responsive
 - ✅ Gestión de permisos de micrófono
 - ✅ Manejo de errores y estados de carga
+- ✅ Health check del servidor
 
-## Solución de Problemas
+## 📋 Endpoints del Backend
 
-### Error de permisos
-- Verifica que los permisos estén correctamente configurados en AndroidManifest.xml e Info.plist
-- Solicita permisos en tiempo de ejecución usando `permission_handler`
+| Método | Endpoint | Descripción |
+|--------|----------|-------------|
+| GET | `/health` | Health check del servidor |
+| GET | `/` | Información de la API |
+| POST | `/api/transcribe` | Transcribe audio (solo transcripción) |
+| POST | `/api/notes` | Crea nota (transcribe + guarda en Cloudant) |
+| GET | `/api/notes` | Obtiene todas las notas |
+| GET | `/api/notes/{id}` | Obtiene una nota específica |
+| DELETE | `/api/notes/{id}` | Elimina una nota |
 
-### Error de conexión con Watson
-- Verifica tu API Key y Service URL
-- Comprueba tu conexión a internet
-- Revisa los logs de la consola para más detalles
+## 🛠️ Solución de Problemas
 
-### Error al grabar audio
-- Asegúrate de tener permisos de micrófono
-- Prueba en un dispositivo físico en lugar de emulador
-- Verifica que el paquete `record` esté correctamente instalado
+### Error: "No se puede conectar al servidor"
 
-## Próximos Pasos
+1. Verifica que el backend esté corriendo:
+   ```bash
+   curl http://localhost:8000/health
+   ```
 
-- Implementar almacenamiento persistente con SQLite
-- Agregar soporte para múltiples idiomas
+2. Si usas emulador Android, usa `http://10.0.2.2:8000`
+
+3. Si usas dispositivo físico:
+   - Obtén tu IP local: `ipconfig` (Windows) o `ifconfig` (Mac/Linux)
+   - Usa `http://TU_IP:8000` en `api_service.dart`
+   - Asegúrate de estar en la misma red WiFi
+
+### Error: "Failed to transcribe"
+
+1. Verifica tus credenciales de Watson en `.env`
+2. Comprueba que el servicio Watson esté activo en IBM Cloud
+3. Revisa los logs del backend para más detalles
+
+### Error: "Error guardando en Cloudant"
+
+1. Verifica las credenciales de Cloudant en `.env`
+2. Asegúrate de que la base de datos exista (se crea automáticamente)
+3. Comprueba los permisos de la API key de Cloudant
+
+### Error de permisos de micrófono
+
+- Android: Verifica `AndroidManifest.xml`
+- iOS: Verifica `Info.plist`
+- Prueba en dispositivo físico en lugar de emulador
+
+### Notas no se cargan
+
+1. Abre la documentación del backend: `http://localhost:8000/docs`
+2. Prueba el endpoint `GET /api/notes` manualmente
+3. Verifica que haya datos en Cloudant (accede al dashboard de Cloudant)
+
+## 📚 Recursos
+
+- [Documentación Flutter](https://flutter.dev/docs)
+- [FastAPI Documentation](https://fastapi.tiangolo.com/)
+- [IBM Watson Speech to Text](https://cloud.ibm.com/docs/speech-to-text)
+- [IBM Cloudant](https://cloud.ibm.com/docs/Cloudant)
+- [Package Record](https://pub.dev/packages/record)
+- [Package HTTP](https://pub.dev/packages/http)
+
+## 🚀 Próximos Pasos
+
+- Implementar autenticación de usuarios
+- Agregar soporte para múltiples idiomas en Watson
 - Implementar edición de notas transcritas
 - Agregar exportación de notas a PDF/TXT
 - Implementar búsqueda de notas
+- Agregar reproducción de audio guardado
+- Implementar caché local con SQLite
 
-## Recursos
+## 📄 Licencia
 
-- [Documentación Flutter](https://flutter.dev/docs)
-- [IBM Watson Speech to Text](https://cloud.ibm.com/docs/speech-to-text)
-- [Package Record](https://pub.dev/packages/record)
-- [Permission Handler](https://pub.dev/packages/permission_handler)
+Este proyecto es de código abierto y está disponible bajo la licencia MIT.
