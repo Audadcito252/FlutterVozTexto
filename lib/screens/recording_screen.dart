@@ -5,6 +5,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:record/record.dart';
 import 'package:permission_handler/permission_handler.dart';
 import '../services/api_service.dart';
+import '../services/notification_service.dart';
 import '../models/note.dart';
 
 class RecordingScreen extends StatefulWidget {
@@ -38,8 +39,9 @@ class _RecordingScreenState extends State<RecordingScreen> {
         final status = await Permission.microphone.request();
         if (status != PermissionStatus.granted) {
           if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(content: Text('Se requiere permiso para el micrófono')),
+            NotificationService.showError(
+              context,
+              'Se requiere permiso para acceder al micrófono',
             );
           }
           return;
@@ -62,19 +64,15 @@ class _RecordingScreenState extends State<RecordingScreen> {
           // En web, no necesitamos directorio, el audio se guarda en memoria
           path = 'audio_${DateTime.now().millisecondsSinceEpoch}';
         } else {
-          // En móvil, guardamos en el directorio temporal
+          // En móvil/desktop, guardamos en el directorio temporal
           final directory = await getTemporaryDirectory();
           path = '${directory.path}/audio_${DateTime.now().millisecondsSinceEpoch}.wav';
         }
         
-        // Configuración mejorada para grabación
+        // Usar la API de la versión 4.4.4
         await _audioRecorder.start(
-          const RecordConfig(
-            encoder: AudioEncoder.wav,
-            sampleRate: 44100,
-            bitRate: 128000,
-          ),
           path: path,
+          encoder: AudioEncoder.wav,
         );
         
         setState(() {
@@ -86,12 +84,12 @@ class _RecordingScreenState extends State<RecordingScreen> {
         print('✓ Grabación iniciada: $path');
         
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('🎙️ Grabando... Habla ahora'),
-              backgroundColor: Colors.green,
-              duration: Duration(seconds: 2),
-            ),
+          NotificationService.show(
+            context,
+            message: 'Grabando... Habla ahora',
+            type: NotificationType.success,
+            customIcon: Icons.mic,
+            duration: const Duration(seconds: 2),
           );
         }
       } else {
@@ -100,11 +98,9 @@ class _RecordingScreenState extends State<RecordingScreen> {
     } catch (e) {
       print('✗ Error al iniciar grabación: $e');
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error: $e'),
-            backgroundColor: Colors.red,
-          ),
+        NotificationService.showError(
+          context,
+          'No se pudo iniciar la grabación',
         );
       }
     }
@@ -133,11 +129,9 @@ class _RecordingScreenState extends State<RecordingScreen> {
     } catch (e) {
       print('✗ Error al detener grabación: $e');
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error: $e'),
-            backgroundColor: Colors.red,
-          ),
+        NotificationService.showError(
+          context,
+          'Error al detener la grabación',
         );
       }
     }
@@ -153,7 +147,7 @@ class _RecordingScreenState extends State<RecordingScreen> {
       // Verificar conexión con el backend
       final isServerAvailable = await _apiService.checkServerHealth();
       if (!isServerAvailable) {
-        throw Exception('No se puede conectar al servidor. Verifica que el backend esté ejecutándose en el puerto 8080.');
+        throw Exception('No se puede conectar al servidor');
       }
       
       // Transcribir usando el backend (Watson + Cloudant)
@@ -164,17 +158,17 @@ class _RecordingScreenState extends State<RecordingScreen> {
         _transcribedText = response['texto'] ?? 'No se detectó voz';
       });
     } catch (e) {
+      print('Error en transcripción: $e');
+      
+      // Extraer mensaje limpio (viene desde api_service.dart)
+      String errorMsg = e.toString().replaceFirst('Exception: ', '');
+      
       setState(() {
-        _transcribedText = 'Error: $e';
+        _transcribedText = 'Error: $errorMsg';
       });
+      
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error: $e'),
-            backgroundColor: Colors.red,
-            duration: const Duration(seconds: 4),
-          ),
-        );
+        NotificationService.showError(context, errorMsg);
       }
     } finally {
       setState(() {
@@ -183,7 +177,7 @@ class _RecordingScreenState extends State<RecordingScreen> {
     }
   }
 
-  Future<void> _saveNote() async {
+  Future<void> _saveNote({bool autoClose = true}) async {
     if (_transcribedText.isNotEmpty && _audioPath != null) {
       // El backend YA guardó la nota en Cloudant cuando transcribió
       // Solo necesitamos obtener los datos del último transcribe
@@ -212,23 +206,26 @@ class _RecordingScreenState extends State<RecordingScreen> {
         widget.onSave(note);
         
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('¡Nota guardada exitosamente en Cloudant!'),
-              backgroundColor: Colors.green,
-            ),
+          NotificationService.showSuccess(
+            context,
+            '¡Nota guardada exitosamente!',
           );
-          Navigator.pop(context);
+          
+          // Solo cerrar si autoClose es true
+          if (autoClose) {
+            // Pequeño delay para que se vea la notificación antes de cerrar
+            await Future.delayed(const Duration(milliseconds: 500));
+            if (mounted) {
+              Navigator.pop(context);
+            }
+          }
         }
       } catch (e) {
         print('Error guardando nota: $e');
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('Error: $e'),
-              backgroundColor: Colors.red,
-              duration: const Duration(seconds: 4),
-            ),
+          NotificationService.showError(
+            context,
+            'No se pudo guardar la nota',
           );
         }
       } finally {
@@ -243,6 +240,108 @@ class _RecordingScreenState extends State<RecordingScreen> {
   void dispose() {
     _audioRecorder.dispose();
     super.dispose();
+  }
+
+  Future<bool> _onWillPop() async {
+    // Si no hay grabación activa ni audio grabado, permitir salir
+    if (!_isRecording && _audioPath == null) {
+      return true;
+    }
+    
+    // Si hay una grabación activa o audio sin procesar, mostrar diálogo
+    final result = await showDialog<String>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        title: const Row(
+          children: [
+            Icon(Icons.warning_amber_rounded, color: Colors.orange, size: 28),
+            SizedBox(width: 12),
+            Text('Grabación en progreso'),
+          ],
+        ),
+        content: Text(
+          _isRecording 
+            ? '¿Qué deseas hacer con la grabación actual?'
+            : 'Tienes una grabación sin guardar. ¿Qué deseas hacer?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, 'cancel'),
+            child: const Text('Cancelar'),
+          ),
+          if (_isRecording)
+            TextButton(
+              onPressed: () => Navigator.pop(context, 'discard'),
+              style: TextButton.styleFrom(foregroundColor: Colors.red),
+              child: const Text('Descartar'),
+            ),
+          if (!_isRecording && _audioPath != null)
+            TextButton(
+              onPressed: () => Navigator.pop(context, 'discard'),
+              style: TextButton.styleFrom(foregroundColor: Colors.red),
+              child: const Text('Descartar'),
+            ),
+          if (_isRecording)
+            ElevatedButton.icon(
+              onPressed: () => Navigator.pop(context, 'save'),
+              icon: const Icon(Icons.save),
+              label: const Text('Guardar'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.green,
+                foregroundColor: Colors.white,
+              ),
+            ),
+          if (!_isRecording && _audioPath != null)
+            ElevatedButton.icon(
+              onPressed: () => Navigator.pop(context, 'save'),
+              icon: const Icon(Icons.save),
+              label: const Text('Guardar'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.green,
+                foregroundColor: Colors.white,
+              ),
+            ),
+        ],
+      ),
+    );
+    
+    if (result == 'cancel') {
+      return false; // No salir
+    } else if (result == 'discard') {
+      // Detener grabación si está activa
+      if (_isRecording) {
+        await _audioRecorder.stop();
+      }
+      // Eliminar archivo si existe
+      if (_audioPath != null) {
+        try {
+          final file = File(_audioPath!);
+          if (await file.exists()) {
+            await file.delete();
+          }
+        } catch (e) {
+          print('Error eliminando archivo: $e');
+        }
+      }
+      if (mounted) {
+        NotificationService.showInfo(context, 'Grabación descartada');
+      }
+      return true; // Permitir salir
+    } else if (result == 'save') {
+      // Si está grabando, detener primero
+      if (_isRecording) {
+        await _stopRecording();
+      }
+      // Procesar y guardar
+      if (_audioPath != null) {
+        await _transcribe(_audioPath!);
+        await _saveNote(autoClose: false);
+      }
+      return true; // Permitir salir después de guardar
+    }
+    
+    return false; // Por defecto, no salir
   }
 
   @override
@@ -263,9 +362,11 @@ class _RecordingScreenState extends State<RecordingScreen> {
     // Max width for desktop
     final maxWidth = isDesktop ? 800.0 : double.infinity;
     
-    return Scaffold(
-      appBar: AppBar(title: const Text('Nueva nota de voz')),
-      body: Center(
+    return WillPopScope(
+      onWillPop: _onWillPop,
+      child: Scaffold(
+        appBar: AppBar(title: const Text('Nueva nota de voz')),
+        body: Center(
         child: Container(
           constraints: BoxConstraints(maxWidth: maxWidth),
           child: Padding(
@@ -344,6 +445,7 @@ class _RecordingScreenState extends State<RecordingScreen> {
               ],
             ),
           ),
+        ),
         ),
       ),
     );

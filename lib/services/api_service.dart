@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 import 'package:http/http.dart' as http;
+import 'package:http_parser/http_parser.dart';
 
 class ApiService {
   // ⚠️ IMPORTANTE: Configura la URL según tu entorno
@@ -34,32 +35,62 @@ class ApiService {
         Uri.parse('$baseUrl/api/transcribe'),
       );
       
-      // Agregar el archivo de audio
-      request.files.add(
-        await http.MultipartFile.fromPath(
-          'audio',
-          audioFile.path,
-        ),
+      print('📤 Preparando envío de audio...');
+      print('   Ruta del archivo: ${audioFile.path}');
+      
+      // Verificar que el archivo existe y tiene contenido
+      final exists = await audioFile.exists();
+      print('   ¿Archivo existe? $exists');
+      
+      if (exists) {
+        final size = await audioFile.length();
+        print('   Tamaño del archivo: $size bytes');
+        
+        if (size == 0) {
+          throw Exception('El archivo de audio está vacío (0 bytes)');
+        }
+      } else {
+        throw Exception('El archivo de audio no existe');
+      }
+      
+      // Agregar el archivo de audio con content-type explícito
+      final multipartFile = await http.MultipartFile.fromPath(
+        'audio',
+        audioFile.path,
+        contentType: MediaType('audio', 'wav'), // Forzar content-type WAV
       );
       
-      print('Enviando audio a: $baseUrl/api/transcribe');
+      request.files.add(multipartFile);
+      
+      print('   Content-Type: ${multipartFile.contentType}');
+      print('📡 Enviando audio a: $baseUrl/api/transcribe');
       
       var streamedResponse = await request.send();
       var response = await http.Response.fromStream(streamedResponse);
       
-      print('Status code: ${response.statusCode}');
-      print('Response body: ${response.body}');
+      print('📥 Status code: ${response.statusCode}');
+      print('📥 Response body: ${response.body}');
       
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
         // El backend retorna: {titulo, texto, id_documento, fecha}
         return data;
       } else {
-        throw Exception('Error en transcripción: ${response.statusCode} - ${response.body}');
+        // Extraer mensaje de error del backend
+        String errorMsg = 'Error al transcribir el audio';
+        try {
+          final errorData = jsonDecode(response.body);
+          errorMsg = errorData['detail'] ?? errorMsg;
+        } catch (_) {
+          errorMsg = 'Error ${response.statusCode}';
+        }
+        throw Exception(errorMsg);
       }
     } catch (e) {
       print('Error en transcribeAudio: $e');
-      throw Exception('Error conectando al servidor: $e');
+      // Si ya es una excepción con mensaje personalizado, relanzarla
+      if (e is Exception) rethrow;
+      throw Exception('No se puede conectar al servidor');
     }
   }
   

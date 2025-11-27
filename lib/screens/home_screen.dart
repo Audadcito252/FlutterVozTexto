@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../models/note.dart';
 import '../services/api_service.dart';
+import '../services/notification_service.dart';
 import 'recording_screen.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -54,16 +55,9 @@ class _HomeScreenState extends State<HomeScreen> {
       print('Error cargando notas: $e');
       
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error cargando notas: $e'),
-            backgroundColor: Colors.orange,
-            action: SnackBarAction(
-              label: 'Reintentar',
-              textColor: Colors.white,
-              onPressed: _loadNotesFromBackend,
-            ),
-          ),
+        NotificationService.showError(
+          context,
+          'No se pudieron cargar las notas. Verifica tu conexión.',
         );
       }
     }
@@ -111,21 +105,17 @@ class _HomeScreenState extends State<HomeScreen> {
       });
 
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Nota eliminada'),
-            backgroundColor: Colors.green,
-          ),
+        NotificationService.showSuccess(
+          context,
+          'Nota eliminada correctamente',
         );
       }
     } catch (e) {
       print('Error eliminando nota: $e');
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Error eliminando nota: $e'),
-            backgroundColor: Colors.red,
-          ),
+        NotificationService.showError(
+          context,
+          'No se pudo eliminar la nota. Verifica tu conexión.',
         );
       }
     }
@@ -153,6 +143,25 @@ class _HomeScreenState extends State<HomeScreen> {
       appBar: AppBar(
         title: const Text('Notas de voz'),
         elevation: 0,
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.add_circle_outline),
+            tooltip: 'Nueva nota de voz',
+            iconSize: 28,
+            onPressed: () async {
+              await Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => RecordingScreen(onSave: (note) {
+                    _addNote(note);
+                    _loadNotesFromBackend();
+                  }),
+                ),
+              );
+            },
+          ),
+          const SizedBox(width: 8),
+        ],
       ),
       body: Center(
         child: Container(
@@ -193,16 +202,53 @@ class _HomeScreenState extends State<HomeScreen> {
                           child: Column(
                             mainAxisAlignment: MainAxisAlignment.center,
                             children: [
-                              Icon(Icons.note_alt_outlined, size: iconSize, color: Colors.grey[400]),
-                              SizedBox(height: isDesktop ? 20 : 16),
+                              Icon(Icons.mic_none_outlined, size: iconSize * 1.5, color: Theme.of(context).primaryColor.withOpacity(0.3)),
+                              SizedBox(height: isDesktop ? 30 : 24),
                               Text(
                                 'Aún no hay notas',
-                                style: TextStyle(color: Colors.grey[600], fontSize: emptyTextSize),
+                                style: TextStyle(
+                                  color: Colors.grey[700],
+                                  fontSize: emptyTextSize * 1.2,
+                                  fontWeight: FontWeight.w600,
+                                ),
                               ),
-                              const SizedBox(height: 8),
+                              const SizedBox(height: 12),
                               Text(
-                                'Toca el botón para crear una',
-                                style: TextStyle(color: Colors.grey[400], fontSize: 14),
+                                'Graba tu primera nota de voz',
+                                style: TextStyle(color: Colors.grey[500], fontSize: 14),
+                              ),
+                              SizedBox(height: isDesktop ? 40 : 32),
+                              ElevatedButton.icon(
+                                onPressed: () async {
+                                  await Navigator.push(
+                                    context,
+                                    MaterialPageRoute(
+                                      builder: (context) => RecordingScreen(onSave: (note) {
+                                        _addNote(note);
+                                        _loadNotesFromBackend();
+                                      }),
+                                    ),
+                                  );
+                                },
+                                icon: Icon(Icons.mic, size: isDesktop ? 28 : 24),
+                                label: Padding(
+                                  padding: EdgeInsets.symmetric(
+                                    horizontal: isDesktop ? 24 : 16,
+                                    vertical: isDesktop ? 16 : 12,
+                                  ),
+                                  child: Text(
+                                    'Grabar nueva nota',
+                                    style: TextStyle(fontSize: isDesktop ? 18 : 16),
+                                  ),
+                                ),
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: Theme.of(context).primaryColor,
+                                  foregroundColor: Colors.white,
+                                  elevation: 4,
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(12),
+                                  ),
+                                ),
                               ),
                             ],
                           ),
@@ -254,20 +300,16 @@ class _HomeScreenState extends State<HomeScreen> {
                             _notes.removeAt(index);
                           });
                           if (mounted) {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(
-                                content: Text('Nota eliminada'),
-                                backgroundColor: Colors.green,
-                              ),
+                            NotificationService.showSuccess(
+                              context,
+                              'Nota eliminada correctamente',
                             );
                           }
                         } catch (e) {
                           if (mounted) {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(
-                                content: Text('Error: $e'),
-                                backgroundColor: Colors.red,
-                              ),
+                            NotificationService.showError(
+                              context,
+                              'No se pudo eliminar la nota. Intenta de nuevo.',
                             );
                             // Recargar lista si hay error
                             _loadNotesFromBackend();
@@ -373,7 +415,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
         ),
       ),
-      floatingActionButton: FloatingActionButton.extended(
+      floatingActionButton: _notes.isEmpty ? null : FloatingActionButton.extended(
         onPressed: () async {
           await Navigator.push(
             context,
@@ -388,6 +430,7 @@ class _HomeScreenState extends State<HomeScreen> {
         },
         label: const Text('Nueva nota'),
         icon: const Icon(Icons.mic),
+        backgroundColor: Theme.of(context).primaryColor,
       ),
     );
   }
