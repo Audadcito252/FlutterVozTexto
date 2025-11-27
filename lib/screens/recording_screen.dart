@@ -1,9 +1,11 @@
 import 'dart:io';
+import 'dart:typed_data';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:record/record.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:http/http.dart' as http;
 import '../services/api_service.dart';
 import '../services/notification_service.dart';
 import '../models/note.dart';
@@ -142,17 +144,28 @@ class _RecordingScreenState extends State<RecordingScreen> {
       _isProcessing = true;
     });
     try {
-      final File audioFile = File(path);
-      
       // Verificar conexión con el backend
       final isServerAvailable = await _apiService.checkServerHealth();
       if (!isServerAvailable) {
         throw Exception('No se puede conectar al servidor');
       }
       
+      // Obtener los bytes del archivo de audio
+      Uint8List audioBytes;
+      
+      if (kIsWeb) {
+        // En web, el path es una URL blob, descargarla
+        final response = await http.get(Uri.parse(path));
+        audioBytes = response.bodyBytes;
+      } else {
+        // En móvil/desktop, leer el archivo
+        final file = File(path);
+        audioBytes = await file.readAsBytes();
+      }
+      
       // Transcribir usando el backend (Watson + Cloudant)
       // El backend retorna: {titulo, texto, id_documento, fecha}
-      final response = await _apiService.transcribeAudio(audioFile);
+      final response = await _apiService.transcribeAudio(path, audioBytes);
       
       setState(() {
         _transcribedText = response['texto'] ?? 'No se detectó voz';
@@ -187,10 +200,21 @@ class _RecordingScreenState extends State<RecordingScreen> {
           _isProcessing = true;
         });
         
-        final File audioFile = File(_audioPath!);
+        // Obtener los bytes del archivo de audio
+        Uint8List audioBytes;
+        
+        if (kIsWeb) {
+          // En web, el path es una URL blob, descargarla
+          final response = await http.get(Uri.parse(_audioPath!));
+          audioBytes = response.bodyBytes;
+        } else {
+          // En móvil/desktop, leer el archivo
+          final file = File(_audioPath!);
+          audioBytes = await file.readAsBytes();
+        }
         
         // Volver a obtener la respuesta completa (incluye id_documento)
-        final response = await _apiService.transcribeAudio(audioFile);
+        final response = await _apiService.transcribeAudio(_audioPath!, audioBytes);
         
         print('Respuesta del backend: $response');
         

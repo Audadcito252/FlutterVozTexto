@@ -1,16 +1,14 @@
 import 'dart:convert';
-import 'dart:io';
+import 'dart:typed_data';
 import 'package:http/http.dart' as http;
 import 'package:http_parser/http_parser.dart';
 
 class ApiService {
-  // ⚠️ IMPORTANTE: Configura la URL según tu entorno
-  // - Web: 'http://localhost:8000'
-  // - Android Emulator: 'http://10.0.2.2:8000'
-  // - iOS Simulator: 'http://localhost:8000'
-  // - Dispositivo físico: 'http://TU_IP_LOCAL:8000' (ej: 'http://192.168.1.100:8000')
+  // 💡 Backend Local con fix para audio de navegadores
+  static const String baseUrl = 'http://localhost:8080';
   
-  static const String baseUrl = 'http://localhost:8000';
+  // ⚠️ API de Producción (requiere actualizar con el fix de formato de audio)
+  // static const String baseUrl = 'https://voznota.236n1v422v4y.br-sao.codeengine.appdomain.cloud';
   
   /// Health check del servidor
   Future<bool> checkServerHealth() async {
@@ -28,7 +26,7 @@ class ApiService {
   
   /// Transcribe un archivo de audio usando Watson (transcribe + guarda en Cloudant)
   /// Este método usa el endpoint del backend VozNota que hace ambas cosas
-  Future<Map<String, dynamic>> transcribeAudio(File audioFile) async {
+  Future<Map<String, dynamic>> transcribeAudio(String audioPath, Uint8List audioBytes) async {
     try {
       var request = http.MultipartRequest(
         'POST',
@@ -36,27 +34,18 @@ class ApiService {
       );
       
       print('📤 Preparando envío de audio...');
-      print('   Ruta del archivo: ${audioFile.path}');
+      print('   Ruta del archivo: $audioPath');
+      print('   Tamaño del archivo: ${audioBytes.length} bytes');
       
-      // Verificar que el archivo existe y tiene contenido
-      final exists = await audioFile.exists();
-      print('   ¿Archivo existe? $exists');
-      
-      if (exists) {
-        final size = await audioFile.length();
-        print('   Tamaño del archivo: $size bytes');
-        
-        if (size == 0) {
-          throw Exception('El archivo de audio está vacío (0 bytes)');
-        }
-      } else {
-        throw Exception('El archivo de audio no existe');
+      if (audioBytes.isEmpty) {
+        throw Exception('El archivo de audio está vacío (0 bytes)');
       }
       
       // Agregar el archivo de audio con content-type explícito
-      final multipartFile = await http.MultipartFile.fromPath(
+      final multipartFile = http.MultipartFile.fromBytes(
         'audio',
-        audioFile.path,
+        audioBytes,
+        filename: 'audio.wav',
         contentType: MediaType('audio', 'wav'), // Forzar content-type WAV
       );
       
@@ -97,8 +86,8 @@ class ApiService {
   /// Crea una nota completa (transcribe el audio y lo guarda en Cloudant)
   /// NOTA: El endpoint /api/transcribe ya hace esto automáticamente
   /// Este método existe por compatibilidad pero redirige a transcribeAudio
-  Future<Map<String, dynamic>> createNote(File audioFile, {String? text}) async {
-    return transcribeAudio(audioFile);
+  Future<Map<String, dynamic>> createNote(String audioPath, Uint8List audioBytes, {String? text}) async {
+    return transcribeAudio(audioPath, audioBytes);
   }
   
   /// Obtiene todas las notas guardadas en Cloudant
