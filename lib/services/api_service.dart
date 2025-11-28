@@ -5,10 +5,10 @@ import 'package:http_parser/http_parser.dart';
 
 class ApiService {
   // 💡 Backend Local con fix para audio de navegadores
-  static const String baseUrl = 'http://localhost:8080';
+  // static const String baseUrl = 'http://localhost:8080';
   
   // ⚠️ API de Producción (requiere actualizar con el fix de formato de audio)
-  // static const String baseUrl = 'https://voznota.236n1v422v4y.br-sao.codeengine.appdomain.cloud';
+  static const String baseUrl = 'https://voznota.236n1v422v4y.br-sao.codeengine.appdomain.cloud';
   
   /// Health check del servidor
   Future<bool> checkServerHealth() async {
