@@ -33,21 +33,18 @@ class Note {
   // Crear nota desde respuesta del backend VozNota
   // Formato del backend: {titulo, texto, id_documento, fecha, _id, _rev}
   factory Note.fromJson(Map<String, dynamic> json) {
-    // Parsear fecha - el backend envía en hora de Perú (UTC-5)
+    // Parsear fecha - el backend envía en UTC, Flutter lo convierte a hora local
     DateTime parsedDate;
     if (json['fecha'] != null) {
       final dateStr = json['fecha'] as String;
-      // Remover 'Z' si existe y parsear
-      final cleanDateStr = dateStr.replaceAll('Z', '').replaceAll('+00:00', '');
-      parsedDate = DateTime.parse(cleanDateStr);
+      // Parse como UTC y convertir a hora local automáticamente
+      parsedDate = DateTime.parse(dateStr).toLocal();
     } else if (json['created_at'] != null) {
       final dateStr = json['created_at'] as String;
-      final cleanDateStr = dateStr.replaceAll('Z', '').replaceAll('+00:00', '');
-      parsedDate = DateTime.parse(cleanDateStr);
+      parsedDate = DateTime.parse(dateStr).toLocal();
     } else if (json['createdAt'] != null) {
       final dateStr = json['createdAt'] as String;
-      final cleanDateStr = dateStr.replaceAll('Z', '').replaceAll('+00:00', '');
-      parsedDate = DateTime.parse(cleanDateStr);
+      parsedDate = DateTime.parse(dateStr).toLocal();
     } else {
       parsedDate = DateTime.now();
     }
