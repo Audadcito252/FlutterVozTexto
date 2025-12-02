@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 import '../models/note.dart';
 import '../services/api_service.dart';
+import '../services/auth_service.dart';
 import '../services/notification_service.dart';
 import 'recording_screen.dart';
+import 'login_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -14,6 +16,7 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   final List<Note> _notes = [];
   final ApiService _apiService = ApiService();
+  final AuthService _authService = AuthService();
   bool _isLoading = false;
   String? _errorMessage;
 
@@ -31,13 +34,18 @@ class _HomeScreenState extends State<HomeScreen> {
     });
 
     try {
+      // Verificar autenticación
+      if (!_authService.isAuthenticated) {
+        throw Exception('No autenticado');
+      }
+
       // Verificar conexión con el servidor
       final isServerAvailable = await _apiService.checkServerHealth();
       if (!isServerAvailable) {
         throw Exception('Backend no disponible. Verifica que esté ejecutándose.');
       }
 
-      final notesData = await _apiService.getNotes();
+      final notesData = await _apiService.getNotes(_authService.token!);
       final notes = notesData.map((data) => Note.fromJson(data)).toList();
 
       setState(() {
@@ -54,12 +62,54 @@ class _HomeScreenState extends State<HomeScreen> {
       });
       print('Error cargando notas: $e');
       
+      // Si es error de autenticación, redirigir a login
+      if (e.toString().contains('autenticado') || e.toString().contains('Token')) {
+        if (mounted) {
+          _handleLogout();
+        }
+        return;
+      }
+      
       if (mounted) {
         NotificationService.showError(
           context,
           'No se pudieron cargar las notas. Verifica tu conexión.',
         );
       }
+    }
+  }
+  
+  /// Cerrar sesión
+  Future<void> _handleLogout() async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Cerrar sesión'),
+        content: const Text('¿Estás seguro de que deseas cerrar sesión?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancelar'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: TextButton.styleFrom(foregroundColor: Colors.red),
+            child: const Text('Cerrar sesión'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm != true) return;
+
+    await _authService.logout();
+    
+    if (mounted) {
+      Navigator.pushAndRemoveUntil(
+        context,
+        MaterialPageRoute(builder: (context) => const LoginScreen()),
+        (route) => false,
+      );
     }
   }
 
@@ -96,7 +146,7 @@ class _HomeScreenState extends State<HomeScreen> {
     try {
       // Eliminar del backend si tiene cloudantId
       if (note.cloudantId != null) {
-        await _apiService.deleteNote(note.cloudantId!);
+        await _apiService.deleteNote(note.cloudantId!, _authService.token!);
       }
 
       // Eliminar de la lista local
@@ -144,6 +194,12 @@ class _HomeScreenState extends State<HomeScreen> {
         title: const Text('Notas de voz'),
         elevation: 0,
         actions: [
+          // Botón de logout
+          IconButton(
+            icon: const Icon(Icons.logout),
+            tooltip: 'Cerrar sesión',
+            onPressed: _handleLogout,
+          ),
           IconButton(
             icon: const Icon(Icons.add_circle_outline),
             tooltip: 'Nueva nota de voz',
@@ -294,7 +350,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       onDismissed: (direction) async {
                         try {
                           if (note.cloudantId != null) {
-                            await _apiService.deleteNote(note.cloudantId!);
+                            await _apiService.deleteNote(note.cloudantId!, _authService.token!);
                           }
                           setState(() {
                             _notes.removeAt(index);

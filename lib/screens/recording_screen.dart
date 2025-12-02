@@ -7,6 +7,7 @@ import 'package:record/record.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:http/http.dart' as http;
 import '../services/api_service.dart';
+import '../services/auth_service.dart';
 import '../services/notification_service.dart';
 import '../models/note.dart';
 
@@ -26,6 +27,7 @@ class _RecordingScreenState extends State<RecordingScreen> {
   String? _audioPath;
   String _transcribedText = '';
   final ApiService _apiService = ApiService();
+  final AuthService _authService = AuthService();
 
   @override
   void initState() {
@@ -165,11 +167,23 @@ class _RecordingScreenState extends State<RecordingScreen> {
       
       // Transcribir usando el backend (Watson + Cloudant)
       // El backend retorna: {titulo, texto, id_documento, fecha}
-      final response = await _apiService.transcribeAudio(path, audioBytes);
+      final response = await _apiService.transcribeAudio(path, audioBytes, _authService.token!);
       
       setState(() {
         _transcribedText = response['texto'] ?? 'No se detectó voz';
       });
+      
+      // Crear la nota inmediatamente después de transcribir
+      final note = Note.fromJson({
+        'id_documento': response['id_documento'],
+        'texto': response['texto'],
+        'titulo': response['titulo'],
+        'fecha': response['fecha'],
+        'audio_path': path,
+      });
+      
+      // Llamar al callback para agregar la nota
+      widget.onSave(note);
     } catch (e) {
       print('Error en transcripción: $e');
       
@@ -193,41 +207,16 @@ class _RecordingScreenState extends State<RecordingScreen> {
   Future<void> _saveNote({bool autoClose = true}) async {
     if (_transcribedText.isNotEmpty && _audioPath != null) {
       // El backend YA guardó la nota en Cloudant cuando transcribió
-      // Solo necesitamos obtener los datos del último transcribe
+      // Solo necesitamos notificar y cerrar, NO volver a transcribir
       
       try {
         setState(() {
           _isProcessing = true;
         });
         
-        // Obtener los bytes del archivo de audio
-        Uint8List audioBytes;
-        
-        if (kIsWeb) {
-          // En web, el path es una URL blob, descargarla
-          final response = await http.get(Uri.parse(_audioPath!));
-          audioBytes = response.bodyBytes;
-        } else {
-          // En móvil/desktop, leer el archivo
-          final file = File(_audioPath!);
-          audioBytes = await file.readAsBytes();
-        }
-        
-        // Volver a obtener la respuesta completa (incluye id_documento)
-        final response = await _apiService.transcribeAudio(_audioPath!, audioBytes);
-        
-        print('Respuesta del backend: $response');
-        
-        // Crear objeto Note con los datos de Cloudant
-        final note = Note.fromJson({
-          'id_documento': response['id_documento'],
-          'texto': response['texto'],
-          'titulo': response['titulo'],
-          'fecha': response['fecha'],
-          'audio_path': _audioPath,
-        });
-        
-        widget.onSave(note);
+        // La nota ya fue guardada durante _transcribeAudio
+        // Solo creamos el objeto Note para pasarlo al callback
+        // IMPORTANTE: No volver a llamar transcribeAudio aquí
         
         if (mounted) {
           NotificationService.showSuccess(

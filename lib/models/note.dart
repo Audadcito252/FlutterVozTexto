@@ -33,17 +33,30 @@ class Note {
   // Crear nota desde respuesta del backend VozNota
   // Formato del backend: {titulo, texto, id_documento, fecha, _id, _rev}
   factory Note.fromJson(Map<String, dynamic> json) {
+    // Parsear fecha - el backend envía en hora de Perú (UTC-5)
+    DateTime parsedDate;
+    if (json['fecha'] != null) {
+      final dateStr = json['fecha'] as String;
+      // Remover 'Z' si existe y parsear
+      final cleanDateStr = dateStr.replaceAll('Z', '').replaceAll('+00:00', '');
+      parsedDate = DateTime.parse(cleanDateStr);
+    } else if (json['created_at'] != null) {
+      final dateStr = json['created_at'] as String;
+      final cleanDateStr = dateStr.replaceAll('Z', '').replaceAll('+00:00', '');
+      parsedDate = DateTime.parse(cleanDateStr);
+    } else if (json['createdAt'] != null) {
+      final dateStr = json['createdAt'] as String;
+      final cleanDateStr = dateStr.replaceAll('Z', '').replaceAll('+00:00', '');
+      parsedDate = DateTime.parse(cleanDateStr);
+    } else {
+      parsedDate = DateTime.now();
+    }
+    
     return Note(
       id: json['id_documento'] ?? json['_id'] ?? json['id'] ?? '',
       text: json['texto'] ?? json['text'] ?? '',
       audioPath: json['audio_path'] ?? json['audioPath'] ?? json['audio_filename'] ?? '',
-      createdAt: json['fecha'] != null 
-          ? DateTime.parse(json['fecha']) 
-          : (json['created_at'] != null 
-              ? DateTime.parse(json['created_at'])
-              : (json['createdAt'] != null
-                  ? DateTime.parse(json['createdAt'])
-                  : DateTime.now())),
+      createdAt: parsedDate,
       cloudantId: json['_id'] ?? json['id_documento'],
       cloudantRev: json['_rev'],
       titulo: json['titulo'],
